@@ -1,12 +1,13 @@
 name: AI Code Review
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 
 concurrency:
   group: ai-review-${{ github.event.pull_request.number }}
@@ -19,7 +20,10 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
+        with:
+          # checkout base repo/ref to avoid executing fork code
+          repository: ${{ github.event.pull_request.base.repo.full_name }}
+          ref: ${{ github.event.pull_request.base.ref }}
       - name: Install jq
         run: sudo apt-get install jq
 
