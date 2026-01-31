@@ -1,0 +1,77 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get install jq
+
+      - name: Get PR diff
+        run: |
+          curl -L \
+            -H "Accept: application/vnd.github.v3.diff" \
+            ${{ github.event.pull_request.url }} \
+            > pr.diff
+
+      - name: Build prompt
+        run: |
+          echo "Você é um revisor sênior de código." > prompt.txt
+          echo "" >> prompt.txt
+          echo "Analise o diff abaixo e responda:" >> prompt.txt
+          echo "" >> prompt.txt
+          echo "DECISAO: APROVADO ou REPROVADO" >> prompt.txt
+          echo "" >> prompt.txt
+          echo "PROBLEMAS:" >> prompt.txt
+          echo "- ..." >> prompt.txt
+          echo "" >> prompt.txt
+          echo "SUGESTOES:" >> prompt.txt
+          echo "- ..." >> prompt.txt
+          echo "" >> prompt.txt
+          echo "Se houver bug ou falha de segurança → REPROVAR." >> prompt.txt
+          echo "" >> prompt.txt
+          cat pr.diff >> prompt.txt
+
+      - name: Call Gemini
+        run: |
+          JSON=$(jq -Rs '{contents:[{parts:[{text:.}]}]}' prompt.txt)
+
+          curl -s \
+            -X POST \
+            -H "Content-Type: application/json" \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
+            -d "$JSON" \
+            > response.json
+
+      - name: Extract review
+        run: |
+          cat response.json | jq -r '.candidates[0].content.parts[0].text' > review.txt
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const review = fs.readFileSync('review.txt', 'utf8');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: review
+            });
+
+      - name: Fail if rejected
+        run: |
+          if grep -q "REPROVADO" review.txt; then
+            echo "❌ AI reprovou o PR"
+            exit 1
+          fi
